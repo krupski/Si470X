@@ -24,7 +24,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "SI470X.h"
+#include "Si470X.h"
 
 // setup the Arduino pins and pin modes and init the fm radio chip
 // region is optional, the default is 0 (USA 200 kHz spacing, 87.5..108 MHz)
