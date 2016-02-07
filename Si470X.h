@@ -20,8 +20,8 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#ifndef _SI470X_H
-#define _SI470X_H
+#ifndef SI470X_H
+#define SI470X_H
 
 #if ARDUINO < 100
   #include <WProgram.h>
@@ -122,7 +122,7 @@
   #define false 0
 #endif
 
-class SI470X
+class Si470X
 {
 	public:
 		uint8_t init (uint8_t, uint8_t, uint8_t, uint8_t, uint8_t = 0);

@@ -20,13 +20,13 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "SI470X.h"
+#include "Si470X.h"
 
 // setup the Arduino pins and pin modes and init the fm radio chip
 // region is optional, the default is 0 (USA 200 kHz spacing, 87.5..108 MHz)
 // region can be optionally set to 0x01 to select the Europe/Japan (100 kHz spacing, 76..108 MHz)
 
-uint8_t SI470X::init (uint8_t sdio_pin, uint8_t sclk_pin, uint8_t sen_pin, uint8_t reset_pin, uint8_t region)
+uint8_t Si470X::init (uint8_t sdio_pin, uint8_t sclk_pin, uint8_t sen_pin, uint8_t reset_pin, uint8_t region)
 {
 	uint8_t timeout; // prevent lockup if chip not working or wired wrong
 
@@ -79,7 +79,7 @@ uint8_t SI470X::init (uint8_t sdio_pin, uint8_t sclk_pin, uint8_t sen_pin, uint8
 	return 1; // return failure
 }
 
-void SI470X::setSeekthreshold (uint8_t th)
+void Si470X::setSeekthreshold (uint8_t th)
 {
 	if (th > 0x7F) { return; } // reject bad value
 	readRegisters();  // read current chip registers
@@ -88,14 +88,14 @@ void SI470X::setSeekthreshold (uint8_t th)
 	writeRegisters();  // update chip registers
 }
 
-void SI470X::setVolext (uint8_t range)
+void Si470X::setVolext (uint8_t range)
 {
 	readRegisters();  // read current chip registers
 	range ? _REGISTERS[SYSCONFIG3] |= _BV (VOLEXT) : _REGISTERS[SYSCONFIG3] &= ~_BV (VOLEXT);
 	writeRegisters();  // update chip registers
 }
 
-void SI470X::setSoftmute (uint8_t ar)
+void Si470X::setSoftmute (uint8_t ar)
 {
 	if (ar > 3) { return; } // bail if illegal
 	readRegisters();  // read current chip registers
@@ -107,7 +107,7 @@ void SI470X::setSoftmute (uint8_t ar)
 }
 
 // set volume 0 ...99
-void SI470X::setVolume (int8_t volume)
+void Si470X::setVolume (int8_t volume)
 {
 	volume = volume < 0 ? 0 : volume > 99 ? 99 : volume;
 	volume = ((volume * 100) / 625); // scale 0...100 to 0...15 evenly
@@ -117,7 +117,7 @@ void SI470X::setVolume (int8_t volume)
 	writeRegisters();  // update chip registers
 }
 
-uint8_t SI470X::getVolume (void)
+uint8_t Si470X::getVolume (void)
 {
 	readRegisters();  // read current chip registers
 	return (((_REGISTERS[SYSCONFIG2] & 0x0F) * 667) / 100); // get volume setting
@@ -125,7 +125,7 @@ uint8_t SI470X::getVolume (void)
 
 // set FM channel, no decimal point (i.e. 104.1 is sent as 1041)
 // we don't check for out of band settings - but these just wrap anyway
-void SI470X::setChannel (uint16_t channel)
+void Si470X::setChannel (uint16_t channel)
 {
 	const uint8_t _CHAN_MULT[] = { 2, 1 }; // channel multipliers for region
 	const uint16_t _CHAN_OFFSET[] = { 875, 760 }; // channel offsets for region
@@ -149,7 +149,7 @@ void SI470X::setChannel (uint16_t channel)
 }
 
 // get FM channel (returned without decimal point (i.e. 104.1 returns as 1041)
-uint16_t SI470X::getChannel (void)
+uint16_t Si470X::getChannel (void)
 {
 	const uint8_t _CHAN_MULT[] = { 2, 1 }; // channel multipliers for region
 	const uint16_t _CHAN_OFFSET[] = { 875, 760 }; // channel offsets for region
@@ -158,7 +158,7 @@ uint16_t SI470X::getChannel (void)
 }
 
 // returns received signal strength (RSSI) in dB microvolts
-uint8_t SI470X::getSignal (void)
+uint8_t Si470X::getSignal (void)
 {
 	readRegisters();  // read current chip registers
 	// received signal strength indicator is 8 bits but 75 dbuV max
@@ -166,7 +166,7 @@ uint8_t SI470X::getSignal (void)
 }
 
 // returns true if station is stereo and chip is actually decoding stereo
-uint8_t SI470X::getStereo (void)
+uint8_t Si470X::getStereo (void)
 {
 	readRegisters();  // read current chip registers
 	return (_REGISTERS[STATUSRSSI] & _BV (STEREO)) ? true : false;
@@ -178,7 +178,7 @@ uint8_t SI470X::getStereo (void)
 // 2 = more stations
 // 3 = good quality stations only
 // 4 = most stations
-void SI470X::setThreshold (uint8_t th)
+void Si470X::setThreshold (uint8_t th)
 {
 	if (th > 4) {
 		return; // if invalid setting, just bail
@@ -197,37 +197,37 @@ void SI470X::setThreshold (uint8_t th)
 }
 
 // mute the audio
-uint8_t SI470X::muteOn (void)
+uint8_t Si470X::muteOn (void)
 {
 	return _setMute (true);
 }
 
 // unmute the audio
-uint8_t SI470X::muteOff (void)
+uint8_t Si470X::muteOff (void)
 {
 	return _setMute (false);
 }
 
 // force mono mode (less noise on weak stations)
-uint8_t SI470X::monoOn (void)
+uint8_t Si470X::monoOn (void)
 {
 	return _setMono (true);
 }
 
 // mono mode off (i.e. stereo)
-uint8_t SI470X::monoOff (void)
+uint8_t Si470X::monoOff (void)
 {
 	return _setMono (false);
 }
 
 // seek UP to the next highest channel
-uint16_t SI470X::seekUp (void)
+uint16_t Si470X::seekUp (void)
 {
 	return _setSeek (true);
 }
 
 // seek DOWN to the next lowest channel
-uint16_t SI470X::seekDown (void)
+uint16_t Si470X::seekDown (void)
 {
 	return _setSeek (false);
 }
@@ -241,7 +241,7 @@ uint16_t SI470X::seekDown (void)
 // note: This also applies to "readRegisters()" below.
 //
 // write all 16 register shadows to the chip (update)
-void SI470X::writeRegisters (void)
+void Si470X::writeRegisters (void)
 {
 	uint8_t regs = 16;
 	while (regs--) { // writing registers 15..0
@@ -259,7 +259,7 @@ void SI470X::writeRegisters (void)
 // returns a pointer to the register shadows so that an advanced user
 // can manipulate registers and bits not supported by this driver.
 // see notes on "address" above.
-uint16_t *SI470X::readRegisters (void)
+uint16_t *Si470X::readRegisters (void)
 {
 	uint8_t regs = 16;
 
@@ -280,7 +280,7 @@ uint16_t *SI470X::readRegisters (void)
 ////////////////// private functions from here down //////////////////
 //////////////////////////////////////////////////////////////////////
 // mute audio on/off
-uint8_t SI470X::_setMute (uint8_t on)
+uint8_t Si470X::_setMute (uint8_t on)
 {
 	readRegisters();  // read current chip registers
 	// clear or set "disable mute" bit
@@ -291,7 +291,7 @@ uint8_t SI470X::_setMute (uint8_t on)
 }
 
 // force mono mode (less noise on really weak stations)
-uint8_t SI470X::_setMono (uint8_t on)
+uint8_t Si470X::_setMono (uint8_t on)
 {
 	readRegisters();  // read current chip registers
 	// set of clear "mono" bit
@@ -302,7 +302,7 @@ uint8_t SI470X::_setMono (uint8_t on)
 }
 
 // seek to the next (up) or previous (down) active channel
-uint16_t SI470X::_setSeek (uint8_t updown)
+uint16_t Si470X::_setSeek (uint8_t updown)
 {
 	readRegisters();  // read current chip registers
 	_REGISTERS[POWERCFG] &= ~_BV (SEEKUP); // seek direction bit
@@ -325,7 +325,7 @@ uint16_t SI470X::_setSeek (uint8_t updown)
 }
 
 // bit-banger 3-wire receive (MSB first)
-uint16_t SI470X::_readChip (uint8_t bits)
+uint16_t Si470X::_readChip (uint8_t bits)
 {
 	uint16_t data = 0;
 
@@ -338,7 +338,7 @@ uint16_t SI470X::_readChip (uint8_t bits)
 }
 
 // bit-banger 3-wire send (MSB first)
-void SI470X::_writeChip (uint16_t data, uint8_t bits)
+void Si470X::_writeChip (uint16_t data, uint8_t bits)
 {
 	while (bits--) {
 		digitalWrite (_SDIO, (data & _BV (bits)) ? HIGH : LOW); // put data on bus
@@ -347,7 +347,7 @@ void SI470X::_writeChip (uint16_t data, uint8_t bits)
 }
 
 // send out one sclk pulse
-void SI470X::_pulseSCLK (void)
+void Si470X::_pulseSCLK (void)
 {
 	_delay_usec (50);
 	digitalWrite (_SCLK, HIGH);
@@ -355,7 +355,7 @@ void SI470X::_pulseSCLK (void)
 	digitalWrite (_SCLK, LOW);
 }
 
-void SI470X::_delay_usec (uint32_t delay)
+void Si470X::_delay_usec (uint32_t delay)
 {
 	// calibrated for F_CPU == 16000000UL
 	while (delay--) {
