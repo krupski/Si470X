@@ -29,8 +29,6 @@
   #include <Arduino.h>
 #endif
 
-#include <util/delay.h> // for _delay_ms ()
-
 // all kinds of defines for the Si470x chip registers and bits
 #define DEV_ADDR   0b011 // device address for 3 wire mode
 #define RWBIT    _BV (5) // read/write bit location in "address"
@@ -128,12 +126,16 @@ class SI470X
 {
 	public:
 		uint8_t init (uint8_t, uint8_t, uint8_t, uint8_t, uint8_t = 0);
-		void setVolume (uint8_t);
+		void setSeekthreshold (uint8_t);
+		void setVolext (uint8_t);
+		void setSoftmute (uint8_t);
+		void setVolume (int8_t);
+		uint8_t getVolume (void);
 		void setChannel (uint16_t);
 		uint16_t getChannel (void);
 		uint8_t getSignal (void);
 		uint8_t getStereo (void);
-		void setTreshold (uint8_t);
+		void setThreshold (uint8_t);
 		uint8_t muteOn (void);
 		uint8_t muteOff (void);
 		uint8_t monoOn (void);
@@ -149,14 +151,13 @@ class SI470X
 		uint8_t _RESET;
 		uint8_t _REGION; // region code
 		uint16_t _REGISTERS[16]; // chip register shadow
-		const uint8_t _CHAN_MULT[2] = { 2, 1 }; // channel multipliers for region
-		const uint16_t _CHAN_OFFSET[2] = { 875, 760 }; // channel offsets for region
 		uint8_t _setMute (uint8_t);
 		uint8_t _setMono (uint8_t);
 		uint16_t _setSeek (uint8_t);
 		uint16_t _readChip (uint8_t);
 		void _writeChip (uint16_t, uint8_t);
 		void _pulseSCLK (void);
+		void _delay_usec (uint32_t);
 };
 
 #endif
