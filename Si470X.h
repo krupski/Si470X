@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 //
 //  Silicon Labs Si470x FM Radio Chip Driver Library for Arduino
-//  Copyright (c) 2012, 2014 Roger A. Krupski <rakrupski@verizon.net>
+//  Copyright (c) 2012, 2017 Roger A. Krupski <rakrupski@verizon.net>
 //
-//  Last update: 04 June 2014
+//  Last update: 03 March 2017
 //
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License as published by
@@ -24,110 +24,99 @@
 #define SI470X_H
 
 #if ARDUINO < 100
-  #include <WProgram.h>
+#include <WProgram.h>
 #else
-  #include <Arduino.h>
+#include <Arduino.h>
 #endif
 
-// all kinds of defines for the Si470x chip registers and bits
-#define DEV_ADDR   0b011 // device address for 3 wire mode
-#define RWBIT    _BV (5) // read/write bit location in "address"
+#define DEV_WR  0b011000000 // device address for 3 wire mode write
+#define DEV_RD  0b011100000 // device address for 3 wire mode read
 
 // define the register names
-#define DEVICEID    0x00
-#define CHIPID      0x01
-#define POWERCFG    0x02
-#define CHANNEL     0x03
-#define SYSCONFIG1  0x04
-#define SYSCONFIG2  0x05
-#define SYSCONFIG3  0x06
-#define TEST1       0x07
-#define TEST2       0x08
-#define BOOTCONFIG  0x09
-#define STATUSRSSI  0x0A
-#define READCHANNEL 0x0B
-#define RDSA        0x0C
-#define RDSB        0x0D
-#define RDSC        0x0E
-#define RDSD        0x0F
+#define DEVICEID     0x00
+#define CHIPID       0x01
+#define POWERCFG     0x02
+#define CHANNEL      0x03
+#define SYSCONFIG1   0x04
+#define SYSCONFIG2   0x05
+#define SYSCONFIG3   0x06
+#define TEST1        0x07
+#define TEST2        0x08
+#define BOOTCONFIG   0x09
+#define STATUSRSSI   0x0A
+#define READCHANNEL  0x0B
+#define RDSA         0x0C
+#define RDSB         0x0D
+#define RDSC         0x0E
+#define RDSD         0x0F
 
 // register 0x01 - CHIPID
 // firmware and device code bits
-#define FIRMWARE  0x003F
-#define DEV       0x03C0
+#define ENABLED    0x1253
 
 // register 0x02 - POWERCFG
-#define DSMUTE      0x0F
-#define DMUTE       0x0E
-#define MONO        0x0D
-#define RDSM        0x0B
-#define SKMODE      0x0A
-#define SEEKUP      0x09
-#define SEEK        0x08
-#define DISABLE     0x06
-#define ENABLE      0x00
+#define DSMUTE   _BV(0x0F)
+#define DMUTE    _BV(0x0E)
+#define MONO     _BV(0x0D)
+#define RDSM     _BV(0x0B)
+#define SKMODE   _BV(0x0A)
+#define SEEKUP   _BV(0x09)
+#define SEEK     _BV(0x08)
+#define DISABLE  _BV(0x06)
+#define ENABLE   _BV(0x00)
 
 // register 0x03 - CHANNEL
-#define TUNE        0x0F
+#define TUNE     _BV(0x0F)
 
 // register 0x04 - SYSCONFIG1
-#define RDSIEN      0x0F
-#define STCIEN      0x0E
-#define RDS         0x0C
-#define DE          0x0B
-#define AGCD        0x0A
-#define BLNDADJ     0x06
-#define GPIO3       0x04
-#define GPIO2       0x02
-#define GPIO1       0x00
+#define RDSIEN   _BV(0x0F)
+#define STCIEN   _BV(0x0E)
+#define RDS      _BV(0x0C)
+#define DE       _BV(0x0B)
+#define AGCD     _BV(0x0A)
+#define BLNDADJ     (0x06)
+#define GPIO3       (0x04)
+#define GPIO2       (0x02)
+#define GPIO1       (0x00)
 
 // register 0x05 - SYSCONFIG2
-#define SEEKTH      0x08
-#define BAND        0x06
-#define SPACE       0x04
-#define VOLUME      0x00
+#define SEEKTH      (0x08)
+#define BAND        (0x06)
+#define SPACE       (0x04)
+#define VOLUME   _BV(0x00)
 
 // register 0x06 - SYSCONFIG3
-#define SMUTER      0x0E
-#define SMUTEA      0x0C
-#define VOLEXT      0x08
-#define SKSNR       0x04
-#define SKCNT       0x00
+#define SMUTER      (0x0E)
+#define SMUTEA      (0x0C)
+#define VOLEXT   _BV(0x08)
+#define SKSNR       (0x04)
+#define SKCNT       (0x00)
 
 // register 0x07 - TEST1
-#define XOSCEN      0x0F
-#define AHIZEN      0x0E
+#define XOSCEN   _BV(0x0F)
+#define AHIZEN   _BV(0x0E)
 
 // register 0x0A - STATUSRSSI
-#define RDSR        0x0F
-#define STC         0x0E
-#define SFBL        0x0D
-#define AFCRL       0x0C
-#define RDSS        0x0B
-#define BLERA       0x09
-#define STEREO      0x08
-#define RSSI        0x00
+#define RDSR     _BV(0x0F)
+#define STC      _BV(0x0E)
+#define SFBL     _BV(0x0D)
+#define AFCRL    _BV(0x0C)
+#define RDSS     _BV(0x0B)
+#define BLERA    _BV(0x09)
+#define STEREO   _BV(0x08)
+#define RSSI     _BV(0x00)
 
 // register 0x0B - READCHANNEL
-#define BLERB       0x0E
-#define BLERC       0x0C
-#define BLERD       0x0A
-#define READCHAN    0x00
+#define BLERB    _BV(0x0E)
+#define BLERC    _BV(0x0C)
+#define BLERD    _BV(0x0A)
+#define READCHAN _BV(0x00)
 
-#ifndef true
-  #define true 1
-#endif
-
-#ifndef false
-  #define false 0
-#endif
-
-class Si470X
+class SI470X
 {
 	public:
-		uint8_t init (uint8_t, uint8_t, uint8_t, uint8_t, uint8_t = 0);
+		SI470X (uint8_t, uint8_t, uint8_t, uint8_t, uint8_t=99, uint8_t=99);
 		void setSeekthreshold (uint8_t);
-		void setVolext (uint8_t);
 		void setSoftmute (uint8_t);
 		void setVolume (int8_t);
 		uint8_t getVolume (void);
@@ -136,28 +125,65 @@ class Si470X
 		uint8_t getSignal (void);
 		uint8_t getStereo (void);
 		void setThreshold (uint8_t);
-		uint8_t muteOn (void);
-		uint8_t muteOff (void);
-		uint8_t monoOn (void);
-		uint8_t monoOff (void);
-		uint16_t seekUp (void);
-		uint16_t seekDown (void);
-		void writeRegisters (void);
-		uint16_t *readRegisters (void);
+		void setMute (uint8_t);
+		void setMono (uint8_t);
+		uint16_t setSeek (uint8_t);
+		void setRDS (uint8_t);
+		void setRDSmode (uint8_t);
+		void setDE (uint8_t);
+		void setRegion (uint8_t);
+		void setAGC (uint8_t);
+		void setBlendadj (uint8_t);
+		void getRDSdata (void);
+
+
+		void processData (uint16_t, uint16_t, uint16_t, uint16_t);
+		// ----- actual RDS values
+		uint8_t rdsGroupType, rdsTP, rdsPTY, cnt;
+		uint8_t _textAB, _last_textAB, _lastTextIDX;
+		// Program Service Name
+		char _PSName1[10]; // including trailing '\00' character.
+		char _PSName2[10]; // including trailing '\00' character.
+		char programServiceName[10];    // found station name or empty. Is max. 8 character long.
+		uint16_t _lastRDSMinutes; ///< last RDS time send to callback.
+		char _RDSText[64 + 2];
+
+
+
+
+
 	private:
-		uint8_t _SDIO; // chip i/o registers
-		uint8_t _SCLK;
-		uint8_t _SEN;
-		uint8_t _RESET;
-		uint8_t _REGION; // region code
+		// bitmasks
+		uint8_t _VCC_BIT;
+		uint8_t _GND_BIT;
+		uint8_t _SDIO_BIT;
+		uint8_t _SCLK_BIT;
+		uint8_t _SEN_BIT;
+		uint8_t _RESET_BIT;
+		// outputs
+		volatile uint8_t *_VCC_OUT;
+		volatile uint8_t *_GND_OUT;
+		volatile uint8_t *_SDIO_OUT;
+		volatile uint8_t *_SCLK_OUT;
+		volatile uint8_t *_SEN_OUT;
+		volatile uint8_t *_RESET_OUT;
+		// inputs
+		volatile uint8_t *_SDIO_INP;
+		// DDR's
+		volatile uint8_t *_VCC_DDR;
+		volatile uint8_t *_GND_DDR;
+		volatile uint8_t *_SDIO_DDR;
+		volatile uint8_t *_SCLK_DDR;
+		volatile uint8_t *_SEN_DDR;
+		volatile uint8_t *_RESET_DDR;
+		// vars & private functions
+		uint8_t _REGION=0;
 		uint16_t _REGISTERS[16]; // chip register shadow
-		uint8_t _setMute (uint8_t);
-		uint8_t _setMono (uint8_t);
-		uint16_t _setSeek (uint8_t);
-		uint16_t _readChip (uint8_t);
-		void _writeChip (uint16_t, uint8_t);
-		void _pulseSCLK (void);
-		void _delay_usec (uint32_t);
+		void _writeRegisters (uint16_t *);
+		void _readRegisters (uint16_t *);
+		uint16_t _spi_transfer (uint16_t, uint8_t);
+		uint8_t _init (uint8_t, uint8_t, uint8_t);
+
 };
 
 #endif

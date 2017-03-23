@@ -1,9 +1,9 @@
 ///////////////////////////////////////////////////////////////////////////////
 //
 //  Silicon Labs Si470x FM Radio Chip Driver Library for Arduino
-//  Copyright (c) 2012, 2014 Roger A. Krupski <rakrupski@verizon.net>
+//  Copyright (c) 2012, 2017 Roger A. Krupski <rakrupski@verizon.net>
 //
-//  Last update: 04 June 2014
+//  Last update: 03 March 2017
 //
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License as published by
@@ -20,156 +20,315 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "Si470X.h"
+#include "SI470X.h"
 
-// setup the Arduino pins and pin modes and init the fm radio chip
-// region is optional, the default is 0 (USA 200 kHz spacing, 87.5..108 MHz)
-// region can be optionally set to 0x01 to select the Europe/Japan (100 kHz spacing, 76..108 MHz)
+SI470X::SI470X (
+	uint8_t sdio_pin,
+	uint8_t sclk_pin,
+	uint8_t sen_pin,
+	uint8_t reset_pin,
+	uint8_t vcc_pin,
+	uint8_t gnd_pin
+) {
 
-uint8_t Si470X::init (uint8_t sdio_pin, uint8_t sclk_pin, uint8_t sen_pin, uint8_t reset_pin, uint8_t region)
-{
-	uint8_t timeout; // prevent lockup if chip not working or wired wrong
+	uint8_t x;
 
-	_SDIO = sdio_pin; // serial data i/o (pin 8)
-	_SCLK = sclk_pin; // serial clock (pin 7)
-	_SEN = sen_pin; // serial enable (pin 6)
-	_RESET = reset_pin; // reset (pin 5)
+	// pull reset low
+	x = digitalPinToPort (reset_pin);
+	_RESET_OUT = portOutputRegister (x);
+	_RESET_DDR = portModeRegister (x);
+	_RESET_BIT = digitalPinToBitMask (reset_pin);
 
-	_REGION = region & 0x01; // region code (default: 0 - USA 200 kHz)
+	*_RESET_OUT &= ~_RESET_BIT; // RESET initially low
+	*_RESET_DDR |= _RESET_BIT; // set RESET pin as output
 
-	pinMode (_SDIO, INPUT_PULLUP); // setup i/o DDR's
-	pinMode (_SCLK, OUTPUT);
-	pinMode (_SEN, OUTPUT);
-	pinMode (_RESET, OUTPUT);
-
-	// if SEN is low reset is de-asserted, 3 wire mode is selected
-	digitalWrite (_SEN, LOW); // sen low
-	digitalWrite (_RESET, LOW); // reset low
-	_delay_usec (1000); // tiny delay to assure reset complete
-	digitalWrite (_RESET, HIGH); // de-assert reset
-	_delay_usec (1000); // tiny delay to assure reset complete
-
-	readRegisters();  // read current chip registers
-	_REGISTERS[TEST1] |= _BV (XOSCEN); // enable the oscillator (AN230 pg. 12)
-	writeRegisters();  // update chip registers
-
-	_delay_usec (500000); // Wait for clock to settle (pg. 12)
-
-	readRegisters();  // read current chip registers
-	_REGISTERS[POWERCFG] &= ~_BV (DISABLE); // why does it have an enable and disable bit?
-	_REGISTERS[POWERCFG] |= (_BV (DMUTE) | _BV (ENABLE)); // disable mute, enable IC (pg. 12)
-	_REGISTERS[SYSCONFIG1] |= _BV (RDS); // enable rds reception
-	// set band & channel spacing (AN230, pg. 18)
-	_REGISTERS[SYSCONFIG2] |= (_REGION << SPACE); // channel spacing 200 kHz (USA/Europe default)
-	_REGISTERS[SYSCONFIG2] |= (_REGION << BAND); // band select 87.5-108 MHz (default)
-	writeRegisters();  // update chip registers
-
-	timeout = 100; // don't lock up if init fails
-
-	while (timeout--) {
-		readRegisters();  // read current chip registers
-
-		// "firmware" (bits 0..5) and "dev" (bits 6..9) return zero until the
-		// chip is powered up - this is how we wait for the chip to be ready.
-		if (_REGISTERS[CHIPID] & (FIRMWARE | DEV)) {
-			return 0; // return success
-		}
+	// if a ground pin is specified, configure it
+	if (gnd_pin != 99) {
+		x = digitalPinToPort (gnd_pin); // pin -> port
+		_GND_OUT = portOutputRegister (x); // set gnd pin as output
+		_GND_DDR = portModeRegister (x); // get gnd pin's DDR
+		_GND_BIT = digitalPinToBitMask (gnd_pin); // get gnd pin's bitmask
+		*_GND_OUT &= ~_GND_BIT; // set gnd pin low
+		*_GND_DDR |= _GND_BIT; // set gnd pin DDR to output
 	}
 
-	return 1; // return failure
+	// if a vcc pin is specified, configure it
+	if (vcc_pin != 99) {
+		x = digitalPinToPort (vcc_pin); // pin -> port
+		_VCC_OUT = portOutputRegister (x); // set vcc pin as output
+		_VCC_DDR = portModeRegister (x); // get vcc pin's DDR
+		_VCC_BIT = digitalPinToBitMask (vcc_pin); // get vcc pin's bitmask
+		*_VCC_OUT |= _VCC_BIT; // set vcc pin high
+		*_VCC_DDR |= _VCC_BIT; // set vcc pin DDR to output
+	}
+
+	_init (sdio_pin, sclk_pin, sen_pin); // finish init
+
+	// seek threshold settings (AN230, pg. 40)
+	// 0 = default
+	// 1 = recommended
+	// 2 = more stations
+	// 3 = good quality stations only
+	// 4 = most stations
+//	setThreshold (3);
+//	setSeekthreshold (0x3F);
+
 }
 
-void Si470X::setSeekthreshold (uint8_t th)
+void SI470X::setSeekthreshold (uint8_t th)
 {
 	if (th > 0x7F) { return; } // reject bad value
-	readRegisters();  // read current chip registers
-	_REGISTERS[SYSCONFIG2] &= ~(0xFF << SEEKTH);
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[SYSCONFIG2] &= ~(0b11111111 << SEEKTH);
 	_REGISTERS[SYSCONFIG2] |= (th << SEEKTH);
-	writeRegisters();  // update chip registers
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-void Si470X::setVolext (uint8_t range)
-{
-	readRegisters();  // read current chip registers
-	range ? _REGISTERS[SYSCONFIG3] |= _BV (VOLEXT) : _REGISTERS[SYSCONFIG3] &= ~_BV (VOLEXT);
-	writeRegisters();  // update chip registers
-}
-
-void Si470X::setSoftmute (uint8_t ar)
+void SI470X::setSoftmute (uint8_t ar)
 {
 	if (ar > 3) { return; } // bail if illegal
-	readRegisters();  // read current chip registers
-	_REGISTERS[SYSCONFIG3] &= (0x03 << SMUTER); // clear setting
-	_REGISTERS[SYSCONFIG3] &= (0x03 << SMUTEA); // clear setting
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[SYSCONFIG3] &= ~(0b11 << SMUTER); // clear setting
+	_REGISTERS[SYSCONFIG3] &= ~(0b11 << SMUTEA); // clear setting
 	_REGISTERS[SYSCONFIG3] |= (ar << SMUTER); // set soft mute attack/recover
 	_REGISTERS[SYSCONFIG3] |= (ar << SMUTEA); // set soft mute attenuation
-	writeRegisters();  // update chip registers
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// set volume 0 ...99
-void Si470X::setVolume (int8_t volume)
+// set volume 0 ... 100 (mute...0dBFS in steps of 2)
+void SI470X::setVolume (int8_t volume)
 {
-	volume = volume < 0 ? 0 : volume > 99 ? 99 : volume;
-	volume = ((volume * 100) / 625); // scale 0...100 to 0...15 evenly
-	readRegisters();  // read current chip registers
-	_REGISTERS[SYSCONFIG2] &= ~0x0F; // Clear volume bits
-	_REGISTERS[SYSCONFIG2] |= (volume & 0x0F); // Set new volume
-	writeRegisters();  // update chip registers
+	uint8_t vol;
+	uint8_t ext;
+
+	volume = volume < 0 ? 0 : volume > 100 ? 100 : volume;
+
+	switch (volume) {
+		case 0 ... 2: {
+			vol = 0;
+			ext = 1;
+			break;
+		}
+		case 3 ... 6: {
+			vol = 1;
+			ext = 1;
+			break;
+		}
+		case 7 ... 9: {
+			vol = 2;
+			ext = 1;
+			break;
+		}
+		case 10 ... 12: {
+			vol = 3;
+			ext = 1;
+			break;
+		}
+		case 13 ... 15: {
+			vol = 4;
+			ext = 1;
+			break;
+		}
+		case 16 ... 18: {
+			vol = 5;
+			ext = 1;
+			break;
+		}
+		case 19 ... 22: {
+			vol = 6;
+			ext = 1;
+			break;
+		}
+		case 23 ... 25: {
+			vol = 7;
+			ext = 1;
+			break;
+		}
+		case 26 ... 28: {
+			vol = 8;
+			ext = 1;
+			break;
+		}
+		case 29 ... 31: {
+			vol = 9;
+			ext = 1;
+			break;
+		}
+		case 32 ... 34: {
+			vol = 10;
+			ext = 1;
+			break;
+		}
+		case 35 ... 38: {
+			vol = 11;
+			ext = 1;
+			break;
+		}
+		case 39 ... 41: {
+			vol = 12;
+			ext = 1;
+			break;
+		}
+		case 42 ... 44: {
+			vol = 13;
+			ext = 1;
+			break;
+		}
+		case 45 ... 47: {
+			vol = 14;
+			ext = 1;
+			break;
+		}
+		case 48 ... 50: {
+			vol = 15;
+			ext = 1;
+			break;
+		}
+		case 51 ... 54: {
+			vol = 1;
+			ext = 0;
+			break;
+		}
+		case 55 ... 57: {
+			vol = 2;
+			ext = 0;
+			break;
+		}
+		case 58 ... 60: {
+			vol = 3;
+			ext = 0;
+			break;
+		}
+		case 61 ... 63: {
+			vol = 4;
+			ext = 0;
+			break;
+		}
+		case 64 ... 66: {
+			vol = 5;
+			ext = 0;
+			break;
+		}
+		case 67 ... 70: {
+			vol = 6;
+			ext = 0;
+			break;
+		}
+		case 71 ... 73: {
+			vol = 7;
+			ext = 0;
+			break;
+		}
+		case 74 ... 76: {
+			vol = 8;
+			ext = 0;
+			break;
+		}
+		case 77 ... 79: {
+			vol = 9;
+			ext = 0;
+			break;
+		}
+		case 80 ... 82: {
+			vol = 10;
+			ext = 0;
+			break;
+		}
+		case 83 ... 86: {
+			vol = 11;
+			ext = 0;
+			break;
+		}
+		case 87 ... 89: {
+			vol = 12;
+			ext = 0;
+			break;
+		}
+		case 90 ... 93: {
+			vol = 13;
+			ext = 0;
+			break;
+		}
+		case 94 ... 96: {
+			vol = 14;
+			ext = 0;
+			break;
+		}
+		case 97 ... 100: {
+			vol = 15;
+			ext = 0;
+			break;
+		}
+		default: {
+			vol = 0;
+			ext = 1;
+		}
+	}
+	_readRegisters (_REGISTERS); // read current chip registers
+	ext ? _REGISTERS[SYSCONFIG3] |= VOLEXT : _REGISTERS[SYSCONFIG3] &= ~VOLEXT;
+	_REGISTERS[SYSCONFIG2] &= ~0b1111; // Clear volume bits
+	_REGISTERS[SYSCONFIG2] |= (vol & 0b1111); // Set new volume
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-uint8_t Si470X::getVolume (void)
+uint8_t SI470X::getVolume (void)
 {
-	readRegisters();  // read current chip registers
-	return (((_REGISTERS[SYSCONFIG2] & 0x0F) * 667) / 100); // get volume setting
+	uint16_t ext;
+	_readRegisters (_REGISTERS); // read current chip registers
+	ext = (_REGISTERS[SYSCONFIG3] & VOLEXT) ? 0 : 15; // get ext setting
+	return (uint8_t)(((_REGISTERS[SYSCONFIG2] & 0b1111) + ext) * (100.0 / 30.0)); // get volume setting
 }
 
 // set FM channel, no decimal point (i.e. 104.1 is sent as 1041)
 // we don't check for out of band settings - but these just wrap anyway
-void Si470X::setChannel (uint16_t channel)
+void SI470X::setChannel (uint16_t channel)
 {
 	const uint8_t _CHAN_MULT[] = { 2, 1 }; // channel multipliers for region
 	const uint16_t _CHAN_OFFSET[] = { 875, 760 }; // channel offsets for region
-	readRegisters();  // read current chip registers
-	_REGISTERS[CHANNEL] &= ~0x01FF; // Clear out the channel bits
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[CHANNEL] &= ~0b111111111; // Clear out the channel bits
 	_REGISTERS[CHANNEL] |= ((channel -= _CHAN_OFFSET[_REGION]) / _CHAN_MULT[_REGION]); // OR in the new channel
-	_REGISTERS[CHANNEL] |= _BV (TUNE); // Set the TUNE bit to start
-	writeRegisters();  // update chip registers
+	_REGISTERS[CHANNEL] |= TUNE; // Set the TUNE bit to start
+	_writeRegisters (_REGISTERS); // update chip registers
 
 	while (1) {
-		readRegisters();  // read current chip registers
-
+		_readRegisters (_REGISTERS); // read current chip registers
 		// wait for "seek complete" to be asserted
-		if (_REGISTERS[STATUSRSSI] & _BV (STC)) {
+		if (_REGISTERS[STATUSRSSI] & STC) {
 			break;
 		}
 	}
 
-	_REGISTERS[CHANNEL] &= ~_BV (TUNE); // tune complete, clear tune bit
-	writeRegisters();  // update chip registers
+	_REGISTERS[CHANNEL] &= ~TUNE; // tune complete, clear tune bit
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
 // get FM channel (returned without decimal point (i.e. 104.1 returns as 1041)
-uint16_t Si470X::getChannel (void)
+uint16_t SI470X::getChannel (void)
 {
 	const uint8_t _CHAN_MULT[] = { 2, 1 }; // channel multipliers for region
 	const uint16_t _CHAN_OFFSET[] = { 875, 760 }; // channel offsets for region
-	readRegisters();  // read current chip registers
-	return (((_REGISTERS[READCHANNEL] & 0x01FF) * _CHAN_MULT[_REGION]) + _CHAN_OFFSET[_REGION]);
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	return (((_REGISTERS[READCHANNEL] & 0b111111111) * _CHAN_MULT[_REGION]) + _CHAN_OFFSET[_REGION]);
 }
 
 // returns received signal strength (RSSI) in dB microvolts
-uint8_t Si470X::getSignal (void)
+uint8_t SI470X::getSignal (void)
 {
-	readRegisters();  // read current chip registers
+	_readRegisters (_REGISTERS); // read current chip registers
 	// received signal strength indicator is 8 bits but 75 dbuV max
-	return (_REGISTERS[STATUSRSSI] & 0x7F);
+	return (_REGISTERS[STATUSRSSI] & 0b1111111);
 }
 
 // returns true if station is stereo and chip is actually decoding stereo
-uint8_t Si470X::getStereo (void)
+uint8_t SI470X::getStereo (void)
 {
-	readRegisters();  // read current chip registers
-	return (_REGISTERS[STATUSRSSI] & _BV (STEREO)) ? true : false;
+	_readRegisters (_REGISTERS); // read current chip registers
+	return (_REGISTERS[STATUSRSSI] & STEREO) ? 1 : 0;
 }
 
 // seek threshold settings (AN230, pg. 40)
@@ -178,59 +337,134 @@ uint8_t Si470X::getStereo (void)
 // 2 = more stations
 // 3 = good quality stations only
 // 4 = most stations
-void Si470X::setThreshold (uint8_t th)
+void SI470X::setThreshold (uint8_t th)
 {
 	if (th > 4) {
 		return; // if invalid setting, just bail
 	}
+
 	const uint8_t thr[] = { 0x19, 0x19, 0x0C, 0x0C, 0x00 };
 	const uint8_t snr[] = { 0x00, 0x04, 0x04, 0x07, 0x04 };
 	const uint8_t cnt[] = { 0x00, 0x08, 0x08, 0x0F, 0x0F };
-	readRegisters();  // read current chip registers
-	_REGISTERS[SYSCONFIG2] &= ~(0xFF << SEEKTH); //
-	_REGISTERS[SYSCONFIG3] &= ~(0x0F << SKSNR);  // clear bits
-	_REGISTERS[SYSCONFIG3] &= ~(0x0F << SKCNT);  //
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[SYSCONFIG2] &= ~(0b11111111 << SEEKTH); //
+	_REGISTERS[SYSCONFIG3] &= ~(0b1111 << SKSNR);  // clear bits
+	_REGISTERS[SYSCONFIG3] &= ~(0b1111 << SKCNT);  //
 	_REGISTERS[SYSCONFIG2] |= (thr[th] << SEEKTH); // set seek threshold
-	_REGISTERS[SYSCONFIG3] |= (snr[th] << SKSNR); // set seek s/n ratio
-	_REGISTERS[SYSCONFIG3] |= (cnt[th] << SKCNT); // set seek fm impulse detect
-	writeRegisters();  // update chip registers
+	_REGISTERS[SYSCONFIG3] |= (snr[th] << SKSNR);  // set seek s/n ratio
+	_REGISTERS[SYSCONFIG3] |= (cnt[th] << SKCNT);  // set seek fm impulse detect
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// mute the audio
-uint8_t Si470X::muteOn (void)
+// mute audio on/off
+void SI470X::setMute (uint8_t on)
 {
-	return _setMute (true);
+	_readRegisters (_REGISTERS); // read current chip registers
+	// clear or set "disable mute" bit
+	on ? _REGISTERS[POWERCFG] &= ~DMUTE : _REGISTERS[POWERCFG] |= DMUTE;
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// unmute the audio
-uint8_t Si470X::muteOff (void)
+// force mono mode (less noise on really weak stations)
+void SI470X::setMono (uint8_t on)
 {
-	return _setMute (false);
+	_readRegisters (_REGISTERS); // read current chip registers
+	// set of clear "mono" bit
+	on ? _REGISTERS[POWERCFG] |= MONO : _REGISTERS[POWERCFG] &= ~MONO;
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// force mono mode (less noise on weak stations)
-uint8_t Si470X::monoOn (void)
+// seek to the next (up) or previous (down) active channel
+uint16_t SI470X::setSeek (uint8_t updown)
 {
-	return _setMono (true);
+	_readRegisters (_REGISTERS); // read current chip registers
+	updown ? _REGISTERS[POWERCFG] |= SEEKUP : _REGISTERS[POWERCFG] &= ~SEEKUP; // set seek up / down
+	_REGISTERS[POWERCFG] |= SEEK; // enable seeking
+	_writeRegisters (_REGISTERS); // update chip registers
+
+	while (! (_REGISTERS[STATUSRSSI] & SFBL)) { // search until whole band is searched
+		_readRegisters (_REGISTERS); // read current chip registers
+		// stop scanning when "seek complete" is asserted
+		if (_REGISTERS[STATUSRSSI] & STC) {
+			break;
+		}
+	}
+
+	_REGISTERS[POWERCFG] &= ~SEEK; // seek done, clear seek bit
+	_writeRegisters (_REGISTERS); // update chip registers
+	return getChannel(); // return channel found
 }
 
-// mono mode off (i.e. stereo)
-uint8_t Si470X::monoOff (void)
+void SI470X::setRDS (uint8_t on) // enable RDS on/off
 {
-	return _setMono (false);
+	_readRegisters (_REGISTERS); // read current chip registers
+	on ? _REGISTERS[SYSCONFIG1] |= RDS : _REGISTERS[SYSCONFIG1] &= ~RDS;
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// seek UP to the next highest channel
-uint16_t Si470X::seekUp (void)
+void SI470X::setRDSmode (uint8_t mode) // RDS mode standard / verbose
 {
-	return _setSeek (true);
+	_readRegisters (_REGISTERS); // read current chip registers
+	mode ? _REGISTERS[POWERCFG] |= RDSM : _REGISTERS[POWERCFG] &= ~RDSM;
+	_writeRegisters (_REGISTERS); // update chip registers
 }
 
-// seek DOWN to the next lowest channel
-uint16_t Si470X::seekDown (void)
+void SI470X::setDE (uint8_t on) // enable de-emphasis on/off
 {
-	return _setSeek (false);
+	_readRegisters (_REGISTERS); // read current chip registers
+	on ? _REGISTERS[SYSCONFIG1] &= ~DE : _REGISTERS[SYSCONFIG1] |= DE;
+	_writeRegisters (_REGISTERS); // update chip registers
 }
+
+void SI470X::setRegion (uint8_t region) // 0=87.5->108[200kHz], 1=76->108[100kHz]
+{
+	_REGION = (region % 2); // save a copy for library use
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[SYSCONFIG2] |= (_REGION << SPACE); // channel spacing 200 kHz (USA/Europe default)
+	_REGISTERS[SYSCONFIG2] |= (_REGION << BAND); // band select 87.5-108 MHz (default)
+	_writeRegisters (_REGISTERS); // update chip registers
+}
+
+void SI470X::setAGC (uint8_t on) // enable agc on/off
+{
+	_readRegisters (_REGISTERS); // read current chip registers
+	on ? _REGISTERS[SYSCONFIG1] &= ~AGCD : _REGISTERS[SYSCONFIG1] |= AGCD;
+	_writeRegisters (_REGISTERS); // update chip registers
+}
+
+void SI470X::setBlendadj (uint8_t level) // adjust stereo blend
+{
+	if (level > 3) { return; } // bail if illegal
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[SYSCONFIG1] &= ~(0b11 << BLNDADJ); // clear setting
+	_REGISTERS[SYSCONFIG3] |= (level << BLNDADJ); // set blend adjust
+	_writeRegisters (_REGISTERS); // update chip registers
+}
+
+void SI470X::getRDSdata (void)
+{
+//	uint16_t x;
+//	x = 1000; // timeout
+//	while (x--) {
+_REGISTERS[RDSA] = 0;
+_REGISTERS[RDSB] = 0;
+_REGISTERS[RDSC] = 0;
+_REGISTERS[RDSD] = 0;
+		_readRegisters (_REGISTERS); // read current chip registers
+		if (_REGISTERS[STATUSRSSI] & RDSR) { // wait for RDS data
+			processData (_REGISTERS[RDSA], _REGISTERS[RDSB], _REGISTERS[RDSC], _REGISTERS[RDSD]);
+//			return;
+		}
+//	}
+//	processData (0, 0, 0, 0);
+}
+
+
+//////////////////////////////////////////////////////////////////////
+////////////////// private functions from here down //////////////////
+//////////////////////////////////////////////////////////////////////
 
 // note: the 9 bit "address" contains:
 //
@@ -238,132 +472,234 @@ uint16_t Si470X::seekDown (void)
 // val: [ 0  1  1 ] [R/W] [ 0 ] [register 0x00-0x0F]
 //
 // note: WRITE: R/W = 0, READ: R/W = 1
-// note: This also applies to "readRegisters()" below.
+// note: This also applies to "_readRegisters()" below.
 //
 // write all 16 register shadows to the chip (update)
-void Si470X::writeRegisters (void)
-{
-	uint8_t regs = 16;
-	while (regs--) { // writing registers 15..0
-		pinMode (_SDIO, OUTPUT); // setup i/o pin as output
-		digitalWrite (_SEN, LOW); // enable chip select
-		_writeChip (((DEV_ADDR << 6) | regs), 9); // send "address" (9 bits)
-		_writeChip (_REGISTERS[regs], 16); // write data (16 bits)
-		digitalWrite (_SEN, HIGH); // disable chip select
-		pinMode (_SDIO, INPUT_PULLUP); // set i/o pin as input
-		_pulseSCLK();  // send the required 26th clock
-	} // note: _SDIO pin is always left as an input when finished
-}
-
-// read all 16 chip registers into the register shadows.
-// returns a pointer to the register shadows so that an advanced user
-// can manipulate registers and bits not supported by this driver.
-// see notes on "address" above.
-uint16_t *Si470X::readRegisters (void)
+//read 0x0A...0x0F, 0x00...0x09
+void SI470X::_writeRegisters (uint16_t *_REGS)
 {
 	uint8_t regs = 16;
 
-	while (regs--) { // reading registers 15..0
-		pinMode (_SDIO, OUTPUT); // setup i/o pin as output
-		digitalWrite (_SEN, LOW); // enable chip select
-		_writeChip (((DEV_ADDR << 6) | RWBIT | regs), 9); // send "address" (9 bits)
-		pinMode (_SDIO, INPUT_PULLUP); // set i/o pin as input
-		_REGISTERS[regs] = _readChip (16); // read data (16 bits)
-		digitalWrite (_SEN, HIGH); // disable chip select
-		_pulseSCLK();  // send the required 26th clock
-	} // note: _SDIO pin is always left as an input when finished
-
-	return _REGISTERS;
-}
-
-//////////////////////////////////////////////////////////////////////
-////////////////// private functions from here down //////////////////
-//////////////////////////////////////////////////////////////////////
-// mute audio on/off
-uint8_t Si470X::_setMute (uint8_t on)
-{
-	readRegisters();  // read current chip registers
-	// clear or set "disable mute" bit
-	on ? _REGISTERS[POWERCFG] &= ~_BV (DMUTE) : _REGISTERS[POWERCFG] |= _BV (DMUTE);
-	writeRegisters();  // update chip registers
-	readRegisters();  // read current chip registers
-	return _REGISTERS[POWERCFG] & _BV (DMUTE) ? false : true; // 1=muted, 0=not muted
-}
-
-// force mono mode (less noise on really weak stations)
-uint8_t Si470X::_setMono (uint8_t on)
-{
-	readRegisters();  // read current chip registers
-	// set of clear "mono" bit
-	on ? _REGISTERS[POWERCFG] |= _BV (MONO) : _REGISTERS[POWERCFG] &= ~_BV (MONO);
-	writeRegisters();  // update chip registers
-	readRegisters();  // read current chip registers
-	return _REGISTERS[POWERCFG] & _BV (MONO) ? true : false; // return mono bit state
-}
-
-// seek to the next (up) or previous (down) active channel
-uint16_t Si470X::_setSeek (uint8_t updown)
-{
-	readRegisters();  // read current chip registers
-	_REGISTERS[POWERCFG] &= ~_BV (SEEKUP); // seek direction bit
-	_REGISTERS[POWERCFG] |= updown ? _BV (SEEKUP) : 0; // set seek up / down
-	_REGISTERS[POWERCFG] |= _BV (SEEK); // enable seeking
-	writeRegisters();  // update chip registers
-
-	while (! (_REGISTERS[STATUSRSSI] & _BV (SFBL))) { // search until whole band is searched
-		readRegisters();  // read current chip registers
-
-		// stop scanning when "seek complete" is asserted
-		if (_REGISTERS[STATUSRSSI] & _BV (STC)) {
-			break;
-		}
+	while (regs--) {
+		_spi_transfer ((DEV_WR | regs), 9); // write address (9 bits)
+		_spi_transfer (_REGS[regs], 16); // write data (16 bits)
+		*_SCLK_OUT |= _SCLK_BIT; // send the required 26th clock
+		__builtin_avr_delay_cycles ((F_CPU / 1e6) * 10); // 10 usec delay
+		*_SCLK_OUT &= ~_SCLK_BIT;
 	}
-
-	_REGISTERS[POWERCFG] &= ~_BV (SEEK); // seek done, clear seek bit
-	writeRegisters();  // update chip registers
-	return getChannel();  // return channel found
 }
 
-// bit-banger 3-wire receive (MSB first)
-uint16_t Si470X::_readChip (uint8_t bits)
+void SI470X::_readRegisters (uint16_t *_REGS)
 {
-	uint16_t data = 0;
+	uint8_t regs = 16;
+
+	while (regs--) {
+		_spi_transfer ((DEV_RD | regs), 9); // write address (9 bits)
+		_REGS[regs] = _spi_transfer (0, 16); // read data (16 bits)
+		*_SCLK_OUT |= _SCLK_BIT; // send the required 26th clock
+		__builtin_avr_delay_cycles ((F_CPU / 1e6) * 10); // 10 usec delay
+		*_SCLK_OUT &= ~_SCLK_BIT;
+	}
+}
+
+// SPI mode 0 data transfer
+uint16_t SI470X::_spi_transfer (uint16_t data, uint8_t bits)
+{
+	*_SEN_OUT &= ~_SEN_BIT; // SEN = low (enable chip select)
+	__builtin_avr_delay_cycles ((F_CPU / 1e6) * 10); // 10 usec delay
 
 	while (bits--) {
-		_pulseSCLK();  // send one SCLK pulse
-		data |= (digitalRead (_SDIO) << bits);
+		// send a bit
+		*_SDIO_DDR |= _SDIO_BIT; // set SDIO as output
+		data & _BV(bits) ? *_SDIO_OUT |= _SDIO_BIT : *_SDIO_OUT &= ~_SDIO_BIT; // put data on bus
+		*_SCLK_OUT |= _SCLK_BIT;  // SCLK high
+		// receive a bit
+		*_SDIO_DDR &= ~_SDIO_BIT; // set SDIO as input
+		*_SDIO_INP & _SDIO_BIT ? data |= _BV(bits) : data &= ~_BV(bits); // get data from bus
+		*_SCLK_OUT &= ~_SCLK_BIT;  // SCLK low
 	}
+
+	__builtin_avr_delay_cycles ((F_CPU / 1e6) * 10); // 10 usec delay
+	*_SEN_OUT |= _SEN_BIT; // SEN = high (disable chip select)
 
 	return data;
 }
 
-// bit-banger 3-wire send (MSB first)
-void Si470X::_writeChip (uint16_t data, uint8_t bits)
+// setup the Arduino pins and pin modes and init the fm radio chip
+uint8_t SI470X::_init (uint8_t sdio_pin, uint8_t sclk_pin, uint8_t sen_pin)
 {
-	while (bits--) {
-		digitalWrite (_SDIO, (data & _BV (bits)) ? HIGH : LOW); // put data on bus
-		_pulseSCLK();  // send one SCLK pulse
+	uint8_t x;
+
+	// set ports, pins & ddr's
+	x = digitalPinToPort (sdio_pin);
+	_SDIO_OUT = portOutputRegister (x);
+	_SDIO_INP = portInputRegister (x);
+	_SDIO_DDR = portModeRegister (x);
+	_SDIO_BIT = digitalPinToBitMask (sdio_pin);
+
+	x = digitalPinToPort (sclk_pin);
+	_SCLK_OUT = portOutputRegister (x);
+	_SCLK_DDR = portModeRegister (x);
+	_SCLK_BIT = digitalPinToBitMask (sclk_pin);
+
+	x = digitalPinToPort (sen_pin);
+	_SEN_OUT = portOutputRegister (x);
+	_SEN_DDR = portModeRegister (x);
+	_SEN_BIT = digitalPinToBitMask (sen_pin);
+
+	// set initial pin values
+	*_SEN_OUT  |= _SEN_BIT;    // SEN initially high
+	*_SCLK_OUT &= ~_SCLK_BIT;  // SCLK idles low
+	*_SDIO_OUT |= _SDIO_BIT;   // SDIO initially high
+
+	*_SEN_DDR  |= _SEN_BIT;   // set SEN pin as output
+	*_SCLK_DDR |= _SCLK_BIT;  // set SCLK pin as output
+	*_SDIO_DDR &= ~_SDIO_BIT; // set SDIO pin as input
+
+	// if SEN is low when reset is de-asserted, 3 wire mode is selected
+	*_SEN_OUT &= ~_SEN_BIT; // set SEN low to select 3 wire mode
+	__builtin_avr_delay_cycles ((F_CPU / 1e6) * 100); // 100 usec wait
+	*_RESET_OUT |= _RESET_BIT; // set RESET high (enable chip in 3 wire mode)
+	__builtin_avr_delay_cycles ((F_CPU / 1e6) * 100); // 100 usec wait
+	*_SEN_OUT |= _SEN_BIT; // set SEN high
+	__builtin_avr_delay_cycles ((F_CPU / 1e6) * 100); // 100 usec wait
+
+	_readRegisters (_REGISTERS); // read current chip registers (AN230 pg. 12)
+	_REGISTERS[TEST1] |= XOSCEN; // enable the oscillator
+	_writeRegisters (_REGISTERS); // update chip registers
+
+	__builtin_avr_delay_cycles ((F_CPU / 1e3) * 500); // let oscillator stabilize
+
+	_readRegisters (_REGISTERS); // read current chip registers
+	_REGISTERS[POWERCFG] |= DMUTE; // disable mute
+	_REGISTERS[POWERCFG] |= ENABLE; // set powerup state
+	_REGISTERS[POWERCFG] &= ~DISABLE; // set powerup state
+	_writeRegisters (_REGISTERS); // update chip registers
+
+	__builtin_avr_delay_cycles ((F_CPU / 1e3) * 110); // datasheet pg 13
+
+	x = 100; // timeout (don't lock up if init fails)
+	while (x--) {
+		_readRegisters (_REGISTERS); // read current chip registers
+		if (_REGISTERS[CHIPID] == ENABLED) {
+			x = 0; // load "success" code
+			break;
+		}
+	}
+
+	return x; // return success or failure
+}
+
+
+void SI470X::processData (uint16_t block1, uint16_t block2, uint16_t block3, uint16_t block4)
+{
+	uint8_t idx; // index of rdsText
+
+	char c1, c2;
+	char *p;
+
+
+	if (block1 == 0) {
+//		// reset all the RDS info.
+//		init();
+//
+//		// Send out empty data
+//		if (_sendServiceName) {
+//			_sendServiceName (programServiceName);
+//		}
+//
+//		if (_sendText) {
+//			_sendText ("");
+//		}
+//
+//		fprintf (stdout, "RDS: No Data\n");
+		return;
+	}
+
+	// analyzing Block 2
+	rdsGroupType = 0x0A | ((block2 & 0xF000) >> 8) | ((block2 & 0x0800) >> 11);
+
+	if (rdsGroupType == 0x0A || rdsGroupType == 0x0B) {
+		// The data received is part of the Service Station Name
+		idx = 2 * (block2 & 0x0003);
+
+		// new data is 2 chars from block 4
+		c1 = block4 >> 8;
+		c2 = block4 & 0x00FF;
+
+		// check that the data was received successfully twice
+		// before publishing the station name
+
+		if ((_PSName1[idx] == c1) && (_PSName1[idx + 1] == c2)) {
+			// retrieved the text a second time: store to _PSName2
+			_PSName2[idx] = c1;
+			_PSName2[idx + 1] = c2;
+			_PSName2[8] = '\0';
+
+			if ((idx == 6) && strcmp (_PSName1, _PSName2) == 0) {
+				if (strcmp (_PSName2, programServiceName) != 0) {
+					// publish station name
+					strcpy (programServiceName, _PSName2);
+
+//	fprintf (stdout, "[%s]\n", programServiceName);
+
+
+				} // if
+			} // if
+		} // if
+
+		if ((_PSName1[idx] != c1) || (_PSName1[idx + 1] != c2)) {
+			_PSName1[idx] = c1;
+			_PSName1[idx + 1] = c2;
+			_PSName1[8] = '\0';
+			// Serial.println(_PSName1);
+		} // if
+	}
+
+
+	if (rdsGroupType == 0x2A) {
+
+		// The data received is part of the RDS Text.
+		_textAB = (block2 & 0x0010);
+		idx = 4 * (block2 & 0x000F);
+
+		if (idx < _lastTextIDX) {
+			// the existing text might be complete because the index is starting at the beginning again.
+			// now send it to the possible listener.
+		//	if (_sendText) {
+		//		_sendText (_RDSText);
+		//	}
+//fprintf (stdout, "CNT: %u\n", cnt);
+//if (cnt == 3) {
+	fprintf (stdout, "%s\n", _RDSText);
+//	cnt = 0;
+//}
+//cnt++;
+//fprintf (stdout, "%s\n", _RDSText);
+
+		}
+
+		_lastTextIDX = idx;
+
+		if (_textAB != _last_textAB) {
+			// when this bit is toggled the whole buffer should be cleared.
+			_last_textAB = _textAB;
+			memset (_RDSText, 0, sizeof (_RDSText));
+		}
+
+
+		// new data is 2 chars from block 3
+		_RDSText[idx] = (block3 >> 8);
+		idx++;
+		_RDSText[idx] = (block3 & 0x00FF);
+		idx++;
+
+		// new data is 2 chars from block 4
+		_RDSText[idx] = (block4 >> 8);
+		idx++;
+		_RDSText[idx] = (block4 & 0x00FF);
+		idx++;
+
 	}
 }
-
-// send out one sclk pulse
-void Si470X::_pulseSCLK (void)
-{
-	_delay_usec (50);
-	digitalWrite (_SCLK, HIGH);
-	_delay_usec (50);
-	digitalWrite (_SCLK, LOW);
-}
-
-void Si470X::_delay_usec (uint32_t delay)
-{
-	// calibrated for F_CPU == 16000000UL
-	while (delay--) {
-		__asm__ __volatile__ (
-			" nop\n" " nop\n" " nop\n" " nop\n" " nop\n"
-			" nop\n" " nop\n" " nop\n" " nop\n" " nop\n"
-		);
-	}
-}
-
 // end of SI470X.cpp
